@@ -76,7 +76,6 @@ const char* getClassName() const {
 }
 
 virtual void onVmCreated(JNIEnv* env) {
-	ALOGD("className=%s\n", mClassName);
 
 	keepLoadingDexspy = dexspyOnVmCreated(env, mClassName);
 	keepLoadingXposed = xposedOnVmCreated(env, mClassName);
@@ -283,7 +282,8 @@ ALOGD("keepLoadingXposed=%u keepLoadingDexspy=%u\n", keepLoadingXposed,
 		keepLoadingDexspy);
 
 if (zygote) {
-	runtime.start(keepLoadingXposed ? XPOSED_CLASS_DOTS : "com.android.internal.os.ZygoteInit",
+//	runtime.start(keepLoadingXposed ? XPOSED_CLASS_DOTS : "com.android.internal.os.ZygoteInit",
+	runtime.start(keepLoadingXposed ? XPOSED_CLASS_DOTS : (keepLoadingDexspy ? DEXSPY_CLASS_DOTS : "com.android.internal.os.ZygoteInit"),
 			startSystemServer ? "start-system-server" : "");
 
 } else if (className) {

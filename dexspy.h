@@ -32,9 +32,7 @@ bool isDexspyDisabled();
 bool dexspyShouldIgnoreCommand(const char* className, int argc,
 		const char* const argv[]);
 bool addDexspyToClasspath(bool zygote);
-//bool dexspyOnVmCreated(JNIEnv* env, const char* className, AndroidRuntime* ar, int argc, const char* const argv[]);
 bool dexspyOnVmCreated(JNIEnv* env, const char* className);
-//void dexspyStartMain(JNIEnv* env, int argc, const char* const argv[]);
 void dexspyStartMain(JNIEnv* env);
 
 // handling hooked methods / helpers

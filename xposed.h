@@ -40,8 +40,6 @@ struct XposedHookInfo {
 	Object* additionalInfo;
 };
 
-void checkXRes(JNIEnv* env);
-
 // called directoy by app_process
 void xposedInfo();
 void xposedEnforceDalvik();
@@ -56,9 +54,6 @@ bool xposedOnVmCreated(JNIEnv* env, const char* className);
 static bool xposedInitMemberOffsets(JNIEnv* env);
 static inline void xposedSetObjectArrayElement(const ArrayObject* obj,
 		int index, Object* val);
-
-//void xposedStartMain(JNIEnv* env, const char* className, AndroidRuntime *ar, int argc, const char* const argv[]);
-void xposedStartMain(JNIEnv* env);
 
 // handling hooked methods / helpers
 static void xposedCallHandler(const u4* args, JValue* pResult,

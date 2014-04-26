@@ -170,12 +170,6 @@ void dexspyStartMain(JNIEnv* env) {
 	}
 
 	ALOGD("dexspyStartMain done\n");
-
-	/*
-	 AndroidRuntime* ar = AndroidRuntime::getRuntime();
-	 ar->callMain(DEXSPY_CLASS, dexspyClass, argc, argv);
-	 */
-
 }
 
 static void dexspyCallHandler(const u4* args, JValue* pResult,
@@ -186,6 +180,8 @@ static void dexspyCallHandler(const u4* args, JValue* pResult,
 				"could not find Dexspy original method - how did you even get here?");
 		return;
 	}
+
+	ALOGD("Handle: [%s]\n", method->name);
 
 	ThreadStatus oldThreadStatus = self->status;
 	JNIEnv* env = self->jniEnv;
@@ -281,8 +277,14 @@ static void dexspyCallHandler(const u4* args, JValue* pResult,
 }
 
 static OriginalMethodsIt findOriginalMethod(const Method* method) {
-	if (method == NULL || method->clazz == NULL)
+	if (method == NULL)
 		return dexspyOriginalMethods.end();
+
+    if (method->clazz == NULL)
+    {
+        ALOGW("No clazz for [%s]! May cause problem..\n", method->name);
+        return dexspyOriginalMethods.end();
+    }
 
 	for (OriginalMethodsIt it = dexspyOriginalMethods.begin();
 			it != dexspyOriginalMethods.end(); it++) {
@@ -409,10 +411,11 @@ static jobject miui_dexspy_DexspyInstaller_invokeOriginalMethodNative(
 
 	// try to find the original method
 	Method* method = (Method*) env->FromReflectedMethod(reflectedMethod);
-	if (method != NULL && method->clazz != NULL) {
-		ALOGD("Invoke: Enter2 [%s] [%s]\n", method->name,
-				method->clazz->descriptor);
-	}
+	/*
+    if (method != NULL) {
+        ALOGD("Invoke_0: %p [%s]\n", method, method->name);
+    }
+	*/
 	OriginalMethodsIt original = findOriginalMethod(method);
 	if (original != dexspyOriginalMethods.end()) {
 		method = &(*original);
@@ -426,8 +429,11 @@ static jobject miui_dexspy_DexspyInstaller_invokeOriginalMethodNative(
 	ClassObject* returnType = (ClassObject*) dvmDecodeIndirectRef(self,
 			returnType1);
 
-	ALOGD("Invoke: [%s]\n", method->name);
 	/*
+    if (method != NULL) {
+        ALOGD("Invoke_1: %p [%s]\n", method, method->name);
+    }
+
 	 if (method && strcmp("getResourcesForApplication", method->name) == 0) {
 	 jclass cls2 = env->FindClass("java/lang/Thread");
 	 if (cls2) {

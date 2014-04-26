@@ -183,16 +183,6 @@ bool addXposedToClasspath(bool zygote) {
 	}
 }
 
-void checkXRes(JNIEnv* env) {
-	xresourcesClass = env->FindClass(XRESOURCES_CLASS);
-	xresourcesClass = reinterpret_cast<jclass>(env->NewGlobalRef(
-			xresourcesClass));
-
-	if (xresourcesClass == NULL) {
-		ALOGW("%s not found\n", XRESOURCES_CLASS);
-	}
-}
-
 bool xposedOnVmCreated(JNIEnv* env, const char* className) {
 	startClassName = className;
 
@@ -233,8 +223,6 @@ bool xposedOnVmCreated(JNIEnv* env, const char* className) {
 		ALOGE("Could not register natives for '%s'\n", XPOSED_CLASS);
 		return false;
 	}
-
-	//checkXRes(env);
 
 	return true;
 }
@@ -281,46 +269,6 @@ static inline void xposedSetObjectArrayElement(const ArrayObject* obj,
 	uintptr_t arrayContents = (uintptr_t) obj + arrayContentsOffset;
 	((Object **) arrayContents)[index] = val;
 	dvmWriteBarrierArray(obj, index, index + 1);
-}
-
-void xposedStartMain(JNIEnv* env) {
-
-	jmethodID methodId;
-	methodId = env->GetStaticMethodID(xposedClass, "determineXposedVersion",
-			"()V");
-	if (methodId == NULL) {
-		ALOGE("ERROR: could not find method\n");
-		return;
-	}
-	env->CallStaticVoidMethod(xposedClass, methodId);
-
-	ALOGD("initNative\n");
-	if (!de_robv_android_xposed_XposedBridge_initNative(env, xposedClass))
-		return;
-
-	if (startClassName == NULL) {
-		ALOGD("initXbridgeZygote\n");
-		methodId = env->GetStaticMethodID(xposedClass, "initXbridgeZygote",
-				"()V");
-		if (methodId == NULL) {
-			ALOGE("ERROR: could not find method\n");
-			return;
-		}
-		env->CallStaticVoidMethod(xposedClass, methodId);
-	}
-
-	ALOGD("loadModules\n");
-	methodId = env->GetStaticMethodID(xposedClass, "loadModules",
-			"(Ljava/lang/String;)V");
-	if (methodId == NULL) {
-		ALOGE("ERROR: could not find method\n");
-		return;
-	}
-
-	env->CallStaticVoidMethod(xposedClass, methodId,
-			env->NewStringUTF(startClassName));
-
-	ALOGD("xposedStartMain done\n");
 }
 
 ////////////////////////////////////////////////////////////
@@ -575,11 +523,14 @@ static void de_robv_android_xposed_XposedBridge_hookMethodNative(JNIEnv* env,
 		return;
 	}
 
-	ALOGD("Hook: [%s] [%s]\n", declaredClass->descriptor, method->name);
 
 	if (xposedIsHooked(method)) {
+		ALOGD("Hook: Ignored! [%s] [%s]\n", declaredClass->descriptor, method->name);
 		// already hooked
 		return;
+	}
+	else {
+		ALOGD("Hook: [%s] [%s]\n", declaredClass->descriptor, method->name);
 	}
 
 	// Save a copy of the original method and other hook info
@@ -624,13 +575,10 @@ static void de_robv_android_xposed_XposedBridge_invokeOriginalMethodNative(
 	Object* thisObject = (Object*) args[4]; // null for static methods
 	ArrayObject* argList = (ArrayObject*) args[5];
 
-	ALOGD("Invoke: [%s] Enter\n", meth->name);
-
 	// invoke the method
 	pResult->l = dvmInvokeMethod(thisObject, meth, argList, params, returnType,
 			true);
 
-	ALOGD("Invoke: [%s]\n", meth->name);
 	return;
 }
 
@@ -706,7 +654,7 @@ static void android_content_res_XResources_rewriteXmlReferencesNative(
 
 static jobject de_robv_android_xposed_XposedBridge_getStartClassName(
 		JNIEnv* env, jclass clazz) {
-	//Ugly hack..
+	//Ugly hack... Start dexspy before xposed if necessary
 	dexspyStartMain(env);
 	return env->NewStringUTF(startClassName);
 }
