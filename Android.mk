@@ -4,7 +4,8 @@ include $(CLEAR_VARS)
 LOCAL_SRC_FILES := \
 	app_main.cpp \
 	xposed_safemode.cpp \
-	xposed.cpp
+	xposed.cpp \
+	dexspy.cpp
 
 LOCAL_SHARED_LIBRARIES := \
 	libcutils \
