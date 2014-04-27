@@ -25,6 +25,7 @@ jclass dexspyClass = NULL;
 jmethodID dexspyHandleHookedMethod = NULL;
 std::list<Method> dexspyOriginalMethods;
 const char* startDexspyClassName = NULL;
+pthread_key_t keyTSSMethod;
 
 void dexspyInfo() {
 	char release[PROPERTY_VALUE_MAX];
@@ -116,10 +117,14 @@ bool addDexspyToClasspath(bool zygote) {
 	}
 }
 
+void onThreadExit (void* var){
+}
 //bool dexspyOnVmCreated(JNIEnv* env, const char* className, AndroidRuntime* ar, int argc, const char* const argv[]) {
 bool dexspyOnVmCreated(JNIEnv* env, const char* className) {
 	if (!keepLoadingDexspy)
 		return false;
+
+	pthread_key_create (&keyTSSMethod, onThreadExit);
 
 	startDexspyClassName = className;
 
@@ -180,8 +185,6 @@ static void dexspyCallHandler(const u4* args, JValue* pResult,
 				"could not find Dexspy original method - how did you even get here?");
 		return;
 	}
-
-	ALOGD("Handle: [%s]\n", method->name);
 
 	ThreadStatus oldThreadStatus = self->status;
 	JNIEnv* env = self->jniEnv;
@@ -245,6 +248,18 @@ static void dexspyCallHandler(const u4* args, JValue* pResult,
 		env->SetObjectArrayElement(argsArray, dstIndex++,
 				dexspyAddLocalReference(self, obj));
 	}
+
+    /*Object* originalReflected2 = dvmCreateReflectMethodObject(method);
+
+	if (originalReflected2) {
+		ALOGD("[%s] [%s]\n", method->name, originalReflected2->clazz->descriptor);
+		jclass cls = env->GetObjectClass(env,obj);
+
+//	ALOGD("[%s] [%s] [%s]\n", method->name, originalReflected2->clazz->descriptor, cls->descriptor);
+	dvmReleaseTrackedAlloc(originalReflected2, NULL);
+	}*/
+	pthread_setspecific (keyTSSMethod, method);
+//	ALOGD("[%s] %p\n", method->name, method);
 
 	// call the Java handler function
 	jobject resultRef = env->CallStaticObjectMethod(dexspyClass,
@@ -411,15 +426,35 @@ static jobject miui_dexspy_DexspyInstaller_invokeOriginalMethodNative(
 
 	// try to find the original method
 	Method* method = (Method*) env->FromReflectedMethod(reflectedMethod);
-	/*
-    if (method != NULL) {
-        ALOGD("Invoke_0: %p [%s]\n", method, method->name);
-    }
-	*/
+
+	if (method == NULL || method->name == NULL) {
+		/*
+		 * There is a chance that ToReflectedMethod() and FromReflectedMethod() don't work if the method
+		 * is hooked by both dexspy and xposed. The workaround is use tss to pass the method to here.
+		 * Luckly only getResourcesForApplication() of android/app/ApplicationPackageManager has the problem. 
+		 * Note tha if another dexspy-hooked method is called within a dexspy-hooked method's before_hook, things
+		 * will still be broken.
+		 */
+		method = (Method*)pthread_getspecific (keyTSSMethod);
+		if (method != NULL) {
+			ALOGD("Invoke: method is NULL, get from tss instead %p [%s]\n", reflectedMethod, method->name);
+	    }
+		else {
+			ALOGE("Invoke: cannot get the original method!\n");
+			return dexspyAddLocalReference(dvmThreadSelf(), NULL);
+		}
+	}
+	pthread_setspecific (keyTSSMethod, NULL);
+
 	OriginalMethodsIt original = findOriginalMethod(method);
 	if (original != dexspyOriginalMethods.end()) {
 		method = &(*original);
 	}
+
+	/*
+	if (method == NULL || method->name == NULL) {
+	}
+	*/
 
 	// dereference parameters
 	::Thread* self = dvmThreadSelf();
