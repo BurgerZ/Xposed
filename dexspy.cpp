@@ -23,7 +23,7 @@ namespace android {
 bool keepLoadingDexspy = false;
 jclass dexspyClass = NULL;
 jmethodID dexspyHandleHookedMethod = NULL;
-std::list<Method> dexspyOriginalMethods;
+//std::list<Method> dexspyOriginalMethods;
 const char* startDexspyClassName = NULL;
 pthread_key_t keyTSSMethod;
 
@@ -177,22 +177,42 @@ void dexspyStartMain(JNIEnv* env) {
 	ALOGD("dexspyStartMain done\n");
 }
 
+static inline bool dexspyIsHooked(const Method* method) {
+	return (method->nativeFunc == &dexspyCallHandler);
+}
+
+static inline bool dexspyIsHookedByXposed(const Method* method) {
+	return (method->nativeFunc != &dexspyCallHandler);
+}
+
 static void dexspyCallHandler(const u4* args, JValue* pResult,
 		const Method* method, ::Thread* self) {
+	/*
 	OriginalMethodsIt original = findOriginalMethod(method);
 	if (original == dexspyOriginalMethods.end()) {
 		dvmThrowNoSuchMethodError(
 				"could not find Dexspy original method - how did you even get here?");
 		return;
+	}*/
+	if (!dexspyIsHooked(method)) {
+		dvmThrowNoSuchMethodError(
+			"could not find Dexspy original method - how did you even get here?");
+		return;
 	}
+
+	DexspyHookInfo* hookInfo = (DexspyHookInfo*)method->insns;
+	Method* original = (Method*)hookInfo;
 
 	ThreadStatus oldThreadStatus = self->status;
 	JNIEnv* env = self->jniEnv;
 
 	// get java.lang.reflect.Method object for original method
+	/*
 	jobject originalReflected = env->ToReflectedMethod(
 			(jclass) dexspyAddLocalReference(self, original->clazz),
 			(jmethodID) method, true);
+	*/
+	jobject originalReflected = hookInfo->reflectedMethod;
 
 	// convert/box arguments
 	const char* desc = &method->shorty[1]; // [0] is the return type.
@@ -249,21 +269,36 @@ static void dexspyCallHandler(const u4* args, JValue* pResult,
 				dexspyAddLocalReference(self, obj));
 	}
 
-    /*Object* originalReflected2 = dvmCreateReflectMethodObject(method);
+	pthread_setspecific (keyTSSMethod, &(*original));
 
-	if (originalReflected2) {
-		ALOGD("[%s] [%s]\n", method->name, originalReflected2->clazz->descriptor);
-		jclass cls = env->GetObjectClass(env,obj);
+	// It's not safe to do so in multi-thread environment.
+	// Forget it and hoping that no MIUI hooks invoke xposed-dexspy-hooked methods or access originalReflected
+	/*
+	jobject resultRef = NULL;
+	Method* realMethod = (Method*)env->FromReflectedMethod(originalReflected);
+	if (dexspyIsHookedByXposed(realMethod)) {
+	//if (0) {
+		ALOGD("%s is hooked by xposed\n", method->name);
+		Method methBack = *(realMethod); //Backup it
+		*realMethod = *method;
 
-//	ALOGD("[%s] [%s] [%s]\n", method->name, originalReflected2->clazz->descriptor, cls->descriptor);
-	dvmReleaseTrackedAlloc(originalReflected2, NULL);
-	}*/
-	pthread_setspecific (keyTSSMethod, method);
-//	ALOGD("[%s] %p\n", method->name, method);
+		// call the Java handler function
+		resultRef = env->CallStaticObjectMethod(dexspyClass,
+			dexspyHandleHookedMethod, originalReflected, thisObject, argsArray);
 
+		ALOGD("%s changed back\n", method->name);
+		*realMethod = methBack;
+	}
+	else {
+		// call the Java handler function
+		resultRef = env->CallStaticObjectMethod(dexspyClass,
+			dexspyHandleHookedMethod, originalReflected, thisObject, argsArray);
+
+	}
+	*/
 	// call the Java handler function
 	jobject resultRef = env->CallStaticObjectMethod(dexspyClass,
-			dexspyHandleHookedMethod, originalReflected, thisObject, argsArray);
+		dexspyHandleHookedMethod, originalReflected, thisObject, argsArray);
 
 	// exceptions are thrown to the caller
 	if (env->ExceptionCheck()) {
@@ -291,6 +326,7 @@ static void dexspyCallHandler(const u4* args, JValue* pResult,
 	dvmChangeStatus(self, oldThreadStatus);
 }
 
+/*
 static OriginalMethodsIt findOriginalMethod(const Method* method) {
 	if (method == NULL)
 		return dexspyOriginalMethods.end();
@@ -313,6 +349,7 @@ static OriginalMethodsIt findOriginalMethod(const Method* method) {
 
 	return dexspyOriginalMethods.end();
 }
+*/
 
 // work-around to get a reference wrapper to an object so that it can be used
 // for certain calls to the JNI environment. almost verbatim copy from Jni.cpp
@@ -393,22 +430,36 @@ static void miui_dexspy_DexspyInstaller_hookMethodNative(JNIEnv* env,
 		return;
 	}
 
-	if (findOriginalMethod(method) != dexspyOriginalMethods.end()) {
+	if (dexspyIsHooked(method)) {
 		ALOGD("why this method already hooked: %s:%s(%s)",
-				method->clazz->descriptor, method->name, method->shorty);
+			method->clazz->descriptor, method->name, method->shorty);
 		// already hooked
 		return;
 	}
-
-	ALOGD("DexspyHook: [%s] [%s] Native=%u\n", declaredClass->descriptor,
+	else {
+		ALOGD("DexspyHook: [%s] [%s] Native=%u\n", declaredClass->descriptor,
 			method->name, IS_METHOD_FLAG_SET(method, ACC_NATIVE));
+	}
 
 	// Save a copy of the original method
-	dexspyOriginalMethods.push_front(*method);
+	//dexspyOriginalMethods.push_front(*method);
+
+	// Save a copy of the original method and other hook info
+	DexspyHookInfo* hookInfo = (DexspyHookInfo*)calloc(1,
+		sizeof(DexspyHookInfo));
+	memcpy(hookInfo, method, sizeof(hookInfo->originalMethodStruct));
+	jobject originalReflected = env->ToReflectedMethod(
+		(jclass)dexspyAddLocalReference(dvmThreadSelf(), declaredClass),
+		(jmethodID)method, true); 
+	//Note that it's the reflection of the method, not a copy. If the method 
+	// is hooked by xposed, it becomes the reflection of the hooked method
+	// since there is only one method object in the java level
+	hookInfo->reflectedMethod = env->NewGlobalRef(originalReflected);
 
 	// Replace method with our own code
 	SET_METHOD_FLAG(method, ACC_NATIVE);
 	method->nativeFunc = &dexspyCallHandler;
+	method->insns = (const u2*)hookInfo;
 	method->registersSize = method->insSize;
 	method->outsSize = 0;
 #ifdef WITH_JIT
@@ -424,37 +475,37 @@ static jobject miui_dexspy_DexspyInstaller_invokeOriginalMethodNative(
 		jobjectArray params1, jclass returnType1, jobject thisObject1,
 		jobjectArray args1) {
 
-	// try to find the original method
-	Method* method = (Method*) env->FromReflectedMethod(reflectedMethod);
+	// Use ptr passed from tss if possible for speeding up
+	Method* method = (Method*)pthread_getspecific(keyTSSMethod);
+	pthread_setspecific (keyTSSMethod, NULL);
 
-	if (method == NULL || method->name == NULL) {
+	if (method == NULL) {
+		// Another dexspy-hooked method is called within a dexspy-hooked method's before_hook?
+
+		// try to find the original method
+		//Method* method = (Method*) env->FromReflectedMethod(reflectedMethod);
+		method = (Method*) env->FromReflectedMethod(reflectedMethod);
+
 		/*
-		 * There is a chance that ToReflectedMethod() and FromReflectedMethod() don't work if the method
-		 * is hooked by both dexspy and xposed. The workaround is use tss to pass the method to here.
-		 * Luckly only getResourcesForApplication() of android/app/ApplicationPackageManager has the problem. 
-		 * Note tha if another dexspy-hooked method is called within a dexspy-hooked method's before_hook, things
-		 * will still be broken.
-		 */
-		method = (Method*)pthread_getspecific (keyTSSMethod);
-		if (method != NULL) {
-			ALOGD("Invoke: method is NULL, get from tss instead %p [%s]\n", reflectedMethod, method->name);
-	    }
+		OriginalMethodsIt original = findOriginalMethod(method);
+		if (original != dexspyOriginalMethods.end()) {
+			method = &(*original);
+		}
+		*/
+
+		if (method != NULL && dexspyIsHooked(method)) {
+			method = (Method*)method->insns;
+		}
 		else {
+			ALOGE("Invoke: not invoking original method! [%s]\n", method ? method->name : "");
+			return dexspyAddLocalReference(dvmThreadSelf(), NULL);
+		}
+
+		if (method == NULL || method->name == NULL) {
 			ALOGE("Invoke: cannot get the original method!\n");
 			return dexspyAddLocalReference(dvmThreadSelf(), NULL);
 		}
 	}
-	pthread_setspecific (keyTSSMethod, NULL);
-
-	OriginalMethodsIt original = findOriginalMethod(method);
-	if (original != dexspyOriginalMethods.end()) {
-		method = &(*original);
-	}
-
-	/*
-	if (method == NULL || method->name == NULL) {
-	}
-	*/
 
 	// dereference parameters
 	::Thread* self = dvmThreadSelf();
@@ -464,21 +515,6 @@ static jobject miui_dexspy_DexspyInstaller_invokeOriginalMethodNative(
 	ClassObject* returnType = (ClassObject*) dvmDecodeIndirectRef(self,
 			returnType1);
 
-	/*
-    if (method != NULL) {
-        ALOGD("Invoke_1: %p [%s]\n", method, method->name);
-    }
-
-	 if (method && strcmp("getResourcesForApplication", method->name) == 0) {
-	 jclass cls2 = env->FindClass("java/lang/Thread");
-	 if (cls2) {
-	 jmethodID mid = env->GetStaticMethodID(cls2, "dumpStack", "()V");
-	 if (mid) {
-	 env->CallStaticVoidMethod(cls2, mid);
-	 }   
-	 }
-	 }
-	 */
 	// invoke the method
 	dvmChangeStatus(self, THREAD_RUNNING);
 	Object* result = dvmInvokeMethod(thisObject, method, args, params,

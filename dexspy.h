@@ -24,7 +24,17 @@ namespace android {
 #endif
 
 extern bool keepLoadingDexspy;
-typedef std::list<Method>::iterator OriginalMethodsIt;
+//typedef std::list<Method>::iterator OriginalMethodsIt;
+struct DexspyHookInfo {
+	struct {
+		Method originalMethod;
+		// copy a few bytes more than defined for Method in AOSP
+		// to accomodate for (rare) extensions by the target ROM
+		int dummyForRomExtensions[4];
+	} originalMethodStruct;
+
+	jobject reflectedMethod;
+};
 
 // called directoy by app_process
 void dexspyInfo();
@@ -34,11 +44,13 @@ bool dexspyShouldIgnoreCommand(const char* className, int argc,
 bool addDexspyToClasspath(bool zygote);
 bool dexspyOnVmCreated(JNIEnv* env, const char* className);
 void dexspyStartMain(JNIEnv* env);
+static inline bool dexspyIsHooked(const Method* method);
+static inline bool dexspyIsHookedByXposed(const Method* method);
 
 // handling hooked methods / helpers
 static void dexspyCallHandler(const u4* args, JValue* pResult,
 		const Method* method, ::Thread* self);
-static OriginalMethodsIt findOriginalMethod(const Method* method);
+//static OriginalMethodsIt findOriginalMethod(const Method* method);
 static jobject dexspyAddLocalReference(::Thread* self, Object* obj);
 static void replaceAsm(void* function, char* newCode, int len);
 
