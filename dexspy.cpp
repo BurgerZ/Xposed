@@ -497,8 +497,15 @@ static jobject miui_dexspy_DexspyInstaller_invokeOriginalMethodNative(
 			method = (Method*)method->insns;
 		}
 		else {
-			ALOGE("Invoke: not invoking original method! [%s]\n", method ? method->name : "");
-			return dexspyAddLocalReference(dvmThreadSelf(), NULL);
+			//I guess it's hooked by both dexspy and xposed
+			Method* methodHookedByDexspy = (Method*)method->insns;
+			if (methodHookedByDexspy != NULL && dexspyIsHooked(methodHookedByDexspy)) {
+				method = (Method*)methodHookedByDexspy->insns;
+			}
+			else {
+				ALOGE("Invoke: not invoking original method! [%s]\n", method ? method->name : "");
+				return dexspyAddLocalReference(dvmThreadSelf(), NULL);
+			}
 		}
 
 		if (method == NULL || method->name == NULL) {
